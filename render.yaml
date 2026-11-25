@@ -1,0 +1,24 @@
+# Render Blueprint for the Beach Patrol Scheduler (deploy package).
+services:
+  - type: web
+    name: beach-patrol-scheduler
+    runtime: node
+    plan: 0.5c-512mb
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    disk:
+      name: scheduler-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "24.22.1"
+      - key: NODE_ENV
+        value: production
+      - key: DB_PATH
+        value: /var/data/beach-patrol.db
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: SETUP_CODE
+        generateValue: true
