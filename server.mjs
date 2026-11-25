@@ -23386,6 +23386,9 @@ function candidatesFor(ctx, date2, slotId, weekDatesList) {
   return groups;
 }
 function lgCompare(a, b) {
+  const pa = a.replace(/\d+$/, "").toUpperCase();
+  const pb = b.replace(/\d+$/, "").toUpperCase();
+  if (pa !== pb) return pa.localeCompare(pb);
   const na = Number(a.replace(/\D/g, ""));
   const nb = Number(b.replace(/\D/g, ""));
   return na - nb || a.localeCompare(b);
@@ -23540,7 +23543,7 @@ function entriesForPerson(db2, personnelId, dates) {
 
 // src/routes/personnel.ts
 var LABEL_COLORS = ["red", "light_blue", "green", "dark_blue", "white"];
-var LG = /^LG\d{1,4}$/i;
+var LG = /^[A-Z]{1,3}\d{1,4}$/i;
 var CERT_CODE = /^[A-Z0-9][A-Z0-9_-]{0,15}$/;
 function personJson(db2, id) {
   const p = get(
@@ -23758,7 +23761,7 @@ var timeOffJson = (t) => ({
 });
 function weekMatrix(db2, weekStart, includeInactive) {
   const dates = weekDates(weekStart);
-  const people = [...loadPersonnel(db2, { from: dates[0], to: dates[6] }).values()].filter((p) => includeInactive || p.active).sort((a, b) => Number(a.lgNumber.slice(2)) - Number(b.lgNumber.slice(2)));
+  const people = [...loadPersonnel(db2, { from: dates[0], to: dates[6] }).values()].filter((p) => includeInactive || p.active).sort((a, b) => lgCompare(a.lgNumber, b.lgNumber));
   const working = dates.map(() => 0);
   const rows = people.map((p) => ({
     personnelId: p.id,
@@ -23788,7 +23791,7 @@ function registerAvailability(r, db2) {
     const view = req.query.get("view") ?? "week";
     const includeInactive = req.query.get("includeInactive") === "true";
     if (view === "pattern") {
-      const people = [...loadPersonnel(db2).values()].filter((p) => includeInactive || p.active).sort((a, b) => Number(a.lgNumber.slice(2)) - Number(b.lgNumber.slice(2)));
+      const people = [...loadPersonnel(db2).values()].filter((p) => includeInactive || p.active).sort((a, b) => lgCompare(a.lgNumber, b.lgNumber));
       return {
         view: "pattern",
         weekdays: WEEKDAYS,
@@ -24204,7 +24207,7 @@ function dailySheet(r, week, opts, ctx) {
       }
     }
     r.table(columns, rows);
-    const off = [...ctx.personnel.values()].filter((p) => p.active).map((p) => ({ p, av: availability(p, d.date) })).filter((x) => !x.av.available).sort((a, b) => Number(a.p.lgNumber.slice(2)) - Number(b.p.lgNumber.slice(2)));
+    const off = [...ctx.personnel.values()].filter((p) => p.active).map((p) => ({ p, av: availability(p, d.date) })).filter((x) => !x.av.available).sort((a, b) => lgCompare(a.p.lgNumber, b.p.lgNumber));
     if (off.length) {
       r.table([{ title: `Off today (${off.length})`, weight: 1 }], [[{ items: off.map((x) => ({ kind: "chip", text: `${x.p.lgNumber} ${OFF_SHORT[x.av.reason ?? "other"]}`, label: x.p.labelColor })) }]]);
     }
@@ -24213,8 +24216,8 @@ function dailySheet(r, week, opts, ctx) {
 function roster(r, week, opts, ctx) {
   r.newPage("Lifeguard roster");
   const days = week.days.filter((d) => opts.dates.includes(d.date));
-  const columns = [{ title: "LG", weight: 0.9 }, { title: "Name", weight: 2 }, ...days.map((d) => ({ title: `${WEEKDAYS[WEEKDAYS.indexOf(d.weekday)].toUpperCase()} ${short(d.date)}`, weight: 1.5 })), { title: "Shifts", weight: 0.7 }];
-  const people = [...ctx.personnel.values()].filter((p) => p.active).sort((a, b) => Number(a.lgNumber.slice(2)) - Number(b.lgNumber.slice(2)));
+  const columns = [{ title: "ID", weight: 0.9 }, { title: "Name", weight: 2 }, ...days.map((d) => ({ title: `${WEEKDAYS[WEEKDAYS.indexOf(d.weekday)].toUpperCase()} ${short(d.date)}`, weight: 1.5 })), { title: "Shifts", weight: 0.7 }];
+  const people = [...ctx.personnel.values()].filter((p) => p.active).sort((a, b) => lgCompare(a.lgNumber, b.lgNumber));
   const rows = people.map((p) => {
     let count = 0;
     const cells = days.map((d) => {
@@ -24308,7 +24311,7 @@ function registerExport(r, db2) {
     kinds: KINDS,
     days: WEEKDAYS,
     toggles: {
-      names: "Print names beside LG numbers",
+      names: "Print names beside IDs",
       colors: "Print personnel label colors",
       criteria: "Print slot requirements (daily sheet, by assignment)",
       empty: "Show open slots as OPEN",
