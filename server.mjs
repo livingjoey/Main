@@ -24404,7 +24404,10 @@ function weekGrid(r, week, opts, ctx) {
   const noteFill = hex("#FFF6D6");
   for (const d of days) {
     const cells = cols.map((c) => cellFor(d, c));
-    const note = opts.notes?.[d.date]?.trim();
+    const strips = [
+      ["Training:", opts.training?.[d.date]?.trim()],
+      ["Note:", opts.notes?.[d.date]?.trim()]
+    ].filter((x) => !!x[1]);
     const dayCell = {
       items: [
         { kind: "text", text: DAY_NAMES[d.weekday], bold: true, size: 8.5 },
@@ -24414,7 +24417,7 @@ function weekGrid(r, week, opts, ctx) {
       fill: C.head
     };
     const h = Math.max(36, r.layout(dayCell, left, r.y, dayW, false), ...cells.map((c, i) => r.layout(c, xs[i], r.y, widths[i], false)));
-    const noteLines = note ? r.wrap(`Note: ${note}`, reg, 7, usable - dayW - PAD * 2) : [];
+    const noteLines = strips.flatMap(([lead, text]) => r.wrap(`${lead} ${text}`, reg, 7, usable - dayW - PAD * 2 - 14));
     const noteH = noteLines.length ? noteLines.length * 9 + 5 : 0;
     if (r.y - h - noteH < MARGIN + 18) {
       r.newPage();
@@ -24430,9 +24433,15 @@ function weekGrid(r, week, opts, ctx) {
     if (noteH) {
       r.page.drawRectangle({ x: left + dayW, y: r.y - noteH, width: usable - dayW, height: noteH, color: noteFill, borderColor: hex("#E8CF6A"), borderWidth: 0.5 });
       noteLines.forEach((line, k) => {
-        const [lead, ...rest] = [line.startsWith("Note:") ? "Note:" : "", line.startsWith("Note:") ? line.slice(5) : line];
-        if (lead) r.text(r.page, lead, left + dayW + PAD, r.y - 9 - k * 9, 7, bold, hex("#5C4700"));
-        r.text(r.page, rest.join(""), left + dayW + PAD + (lead ? bold.widthOfTextAtSize("Note:", 7) : 0), r.y - 9 - k * 9, 7, reg, hex("#5C4700"));
+        const lead = ["Training:", "Note:"].find((l) => line.startsWith(l)) ?? "";
+        const x0 = left + dayW + PAD;
+        if (lead === "Training:") {
+          r.page.drawRectangle({ x: x0, y: r.y - 10.5 - k * 9, width: 12, height: 8, color: C.navy });
+          r.text(r.page, "TR", x0 + 2, r.y - 9 - k * 9, 5.5, bold, C.white);
+        }
+        const x1 = x0 + 14;
+        if (lead) r.text(r.page, lead, x1, r.y - 9 - k * 9, 7, bold, hex("#5C4700"));
+        r.text(r.page, lead ? line.slice(lead.length) : line, x1 + (lead ? bold.widthOfTextAtSize(lead, 7) : 0), r.y - 9 - k * 9, 7, reg, hex("#5C4700"));
       });
       r.y -= noteH;
     }
@@ -24982,6 +24991,84 @@ function buildServer(db2, cfg2, opts = {}) {
 import { createServer as createServer2 } from "node:http";
 import { pbkdf2Sync, randomBytes as randomBytes3, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
+
+// src/domain/personal.ts
+function normaliseId(raw, defaultPrefix = "LG") {
+  const t = raw.trim().toUpperCase().replace(/\s+/g, "");
+  const m = t.match(/^([A-Z]{0,3})0*(\d{1,4})$/);
+  if (!m) return t;
+  return `${m[1] || defaultPrefix}${Number(m[2])}`;
+}
+var hhmm = (t) => t ? t.replace(":", "") : null;
+function personalWeek(input) {
+  const id = normaliseId(input.id);
+  const person = input.people.find((p) => p.active && p.lgNumber.toUpperCase() === id);
+  if (!person) return { found: false, id };
+  const currentWeek = weekStartOf(input.today);
+  const weekStart = weekStartOf(input.week || input.today);
+  const published = [...input.weeks.entries()].filter(([, w2]) => w2.status === "published").map(([k]) => k).sort();
+  const isPub = (k) => input.weeks.get(k)?.status === "published";
+  const prevWeek = [...published].reverse().find((k) => k < weekStart) ?? null;
+  const nextWeek = published.find((k) => k > weekStart) ?? (weekStart < currentWeek ? currentWeek : null);
+  const slotTo = /* @__PURE__ */ new Map();
+  for (const a of input.assignments) for (const s of a.slots) slotTo.set(s.id, { a, slot: s.name ?? "" });
+  const t = personType(person.lgNumber, person.shiftsPerWeek);
+  const ctx = {
+    id: person.id,
+    lgNumber: person.lgNumber,
+    name: "",
+    active: person.active,
+    labelColor: "white",
+    heldCerts: [],
+    certs: /* @__PURE__ */ new Set(),
+    daysOff: new Set(person.daysOff ?? []),
+    timeOff: input.timeOff.filter((x) => x.personnelId === person.id).map((x, i) => ({ id: i, note: "", ...x }))
+  };
+  const w = isPub(weekStart) ? input.weeks.get(weekStart) : null;
+  const extras = (date2) => ({ note: w?.notes?.[date2]?.trim() || null, training: w?.training?.[date2]?.trim() || null });
+  const days = weekDates(weekStart).map((date2) => {
+    const mine = w ? Object.values(w.entries).filter((e) => !!e && e.date === date2 && e.personnelId === person.id) : [];
+    const placed = mine.map((e) => slotTo.get(e.slotId)).filter((x) => !!x);
+    if (placed.length) {
+      const stands = placed.filter((x) => x.a.kind === "stand").sort((x, y) => lgCompare(x.a.code, y.a.code));
+      const units = placed.filter((x) => x.a.kind !== "stand");
+      const main = stands[0]?.a ?? units[0].a;
+      return {
+        date: date2,
+        weekday: weekdayName(date2),
+        status: "work",
+        stands: stands.map((x) => x.a.displayName),
+        units: units.map((x) => x.a.kind === "boat" && x.slot === "Captain" ? `${x.a.displayName} \xB7 Captain` : x.a.displayName),
+        start: hhmm(main.startTime) ?? hhmm(t.start),
+        end: hhmm(main.endTime) ?? hhmm(t.end),
+        hours: t.hoursPerShift,
+        ...extras(date2)
+      };
+    }
+    const av = availability(ctx, date2);
+    const reason = av.available ? "off" : av.reason === "vacation" || av.reason === "leave" || av.reason === "training" || av.reason === "other" ? av.reason : "off";
+    return { date: date2, weekday: weekdayName(date2), status: reason, stands: [], units: [], start: null, end: null, hours: 0, ...extras(date2) };
+  });
+  return {
+    found: true,
+    id: person.lgNumber.toUpperCase(),
+    weekStart,
+    weekEnd: addDays(weekStart, 6),
+    currentWeek,
+    today: input.today,
+    isCurrent: weekStart === currentWeek,
+    published: !!w,
+    prevWeek,
+    nextWeek,
+    days,
+    totalHours: days.reduce((s, d) => s + d.hours, 0)
+  };
+}
+function beachToday(now = /* @__PURE__ */ new Date(), timeZone = "America/New_York") {
+  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+}
+
+// src/hosted.ts
 var COLLECTIONS = /* @__PURE__ */ new Set(["admins", "personnel", "timeoff", "presets", "assignments", "weeks", "layouts", "config", "audit"]);
 var ID = /^[A-Za-z0-9_.:-]{1,100}$/;
 var MAX_BODY2 = 2 * 1024 * 1024;
@@ -25094,6 +25181,8 @@ var PAGE_CSP = [
 function createHostedServer(db2, opts) {
   db2.exec(HOSTED_SCHEMA);
   const attempts = /* @__PURE__ */ new Map();
+  const lookups = /* @__PURE__ */ new Map();
+  const pinFails = /* @__PURE__ */ new Map();
   const sessionCookie = (value, maxAge) => `${COOKIE}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${opts.secureCookies ? "; Secure" : ""}`;
   function currentAdmin(req) {
     const token = cookies(req)[COOKIE];
@@ -25121,11 +25210,51 @@ function createHostedServer(db2, opts) {
       opts.api.emit("request", req, res);
       return;
     }
+    if (path === "/public/schedule" && method === "GET") {
+      const ip = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "").split(",")[0].trim();
+      const now = Date.now();
+      const hit = lookups.get(ip);
+      if (hit && hit.until > now && hit.n >= 120) throw new HttpErr(429, "Too many lookups. Wait a minute and try again.");
+      lookups.set(ip, hit && hit.until > now ? { n: hit.n + 1, until: hit.until } : { n: 1, until: now + 6e4 });
+      if (lookups.size > 5e3) {
+        for (const [k, v] of lookups) if (v.until < now) lookups.delete(k);
+      }
+      const pinSet = String((readDoc(db2, "config", "settings") ?? {}).quickPin ?? "");
+      if (pinSet) {
+        const pin = String(req.headers["x-access-pin"] ?? "");
+        const pf = pinFails.get(ip);
+        if (pf && pf.n >= 10 && pf.until > now) throw new HttpErr(429, "Too many wrong PINs. Try again in 15 minutes.");
+        if (!pin) return json(res, 401, { error: "Enter the access PIN.", pinRequired: true }, { "cache-control": "no-store" });
+        const ok = pin.length === pinSet.length && timingSafeEqual2(Buffer.from(pin), Buffer.from(pinSet));
+        if (!ok) {
+          pinFails.set(ip, { n: (pf && pf.until > now ? pf.n : 0) + 1, until: now + 15 * 6e4 });
+          return json(res, 401, { error: "That PIN is not right.", pinRequired: true, wrongPin: true }, { "cache-control": "no-store" });
+        }
+        pinFails.delete(ip);
+      }
+      const id2 = (url.searchParams.get("id") ?? "").slice(0, 12);
+      const week = url.searchParams.get("week");
+      if (!/^[A-Za-z]{0,3}\s*\d{1,4}$/.test(id2.trim())) throw new HttpErr(400, "Enter your ID number.");
+      if (week && !/^\d{4}-\d{2}-\d{2}$/.test(week)) throw new HttpErr(400, "Bad week.");
+      const docs = (col2) => all(db2, "SELECT id, data FROM app_docs WHERE collection = ? AND data IS NOT NULL", col2).map((r) => ({ id: r.id, data: JSON.parse(r.data) }));
+      const weeks = new Map(docs("weeks").map((d) => [d.id, d.data]));
+      const result = personalWeek({
+        id: id2,
+        week,
+        today: beachToday(),
+        people: docs("personnel").map((d) => d.data),
+        timeOff: docs("timeoff").map((d) => d.data),
+        assignments: docs("assignments").map((d) => d.data),
+        weeks
+      });
+      return json(res, result.found ? 200 : 404, result, { "cache-control": "no-store" });
+    }
     if (!path.startsWith("/auth/") && !path.startsWith("/store/")) return json(res, 404, { error: "Not found." });
     if (method !== "GET" && req.headers["x-requested-with"] !== "bps") throw new HttpErr(403, "Request refused.");
     if (path === "/auth/status" && method === "GET") {
       const a = currentAdmin(req);
-      return json(res, 200, { setupNeeded: setupNeeded(), setupCodeRequired: !!opts.setupCode, admin: a ? adminInfo(a) : null });
+      const quickPin = !!String((readDoc(db2, "config", "settings") ?? {}).quickPin ?? "");
+      return json(res, 200, { setupNeeded: setupNeeded(), setupCodeRequired: !!opts.setupCode, quickPin, admin: a ? adminInfo(a) : null });
     }
     if (path === "/auth/setup" && method === "POST") {
       const b2 = await body(req);
@@ -25164,6 +25293,22 @@ function createHostedServer(db2, opts) {
       const { id: id2, ...rest } = a;
       writeDoc(db2, "admins", String(id2), { ...rest, lastLoginAt: (/* @__PURE__ */ new Date()).toISOString() });
       return json(res, 200, { admin: adminInfo(a) }, { "set-cookie": startSession(String(id2)) });
+    }
+    if (path === "/auth/verify" && method === "POST") {
+      if (!currentAdmin(req)) throw new HttpErr(401, "Sign in required.");
+      const b2 = await body(req);
+      const identifier = String(b2.identifier ?? "").trim().toUpperCase();
+      const password = String(b2.password ?? "");
+      const key = `${identifier}|${req.socket.remoteAddress}`;
+      const f = attempts.get(key);
+      if (f && f.n >= 5 && f.until > Date.now()) throw new HttpErr(429, "Too many failed attempts. Try again in 15 minutes.");
+      const a = liveAdmins(db2).find((x) => String(x.identifier).toUpperCase() === identifier);
+      if (!a || !a.active || !checkPassword(password, a.salt, a.hash)) {
+        attempts.set(key, { n: (f && f.until > Date.now() ? f.n : 0) + 1, until: Date.now() + 15 * 6e4 });
+        throw new HttpErr(403, "Identifier or password is incorrect.");
+      }
+      attempts.delete(key);
+      return json(res, 200, { ok: true, identifier: a.identifier });
     }
     if (path === "/auth/logout" && method === "POST") return json(res, 200, { ok: true }, { "set-cookie": sessionCookie("", 0) });
     const me = currentAdmin(req);
