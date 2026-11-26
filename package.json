@@ -1,6 +1,6 @@
 {
   "name": "beach-patrol-scheduler",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "private": true,
   "description": "Manatee County Beach Patrol Scheduler: deploy package (server and page in single files).",
   "type": "module",
