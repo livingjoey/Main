@@ -566,10 +566,10 @@ var require_strings = __commonJS({
     };
     var dateRegex = /^D:(\d\d\d\d)(\d\d)?(\d\d)?(\d\d)?(\d\d)?(\d\d)?([+\-Z])?(\d\d)?'?(\d\d)?'?$/;
     exports.parseDate = function(dateStr) {
-      var match = dateStr.match(dateRegex);
-      if (!match)
+      var match2 = dateStr.match(dateRegex);
+      if (!match2)
         return void 0;
-      var year = match[1], _a = match[2], month = _a === void 0 ? "01" : _a, _b = match[3], day = _b === void 0 ? "01" : _b, _c = match[4], hours = _c === void 0 ? "00" : _c, _d = match[5], mins = _d === void 0 ? "00" : _d, _e = match[6], secs = _e === void 0 ? "00" : _e, _f = match[7], offsetSign = _f === void 0 ? "Z" : _f, _g = match[8], offsetHours = _g === void 0 ? "00" : _g, _h = match[9], offsetMins = _h === void 0 ? "00" : _h;
+      var year = match2[1], _a = match2[2], month = _a === void 0 ? "01" : _a, _b = match2[3], day = _b === void 0 ? "01" : _b, _c = match2[4], hours = _c === void 0 ? "00" : _c, _d = match2[5], mins = _d === void 0 ? "00" : _d, _e = match2[6], secs = _e === void 0 ? "00" : _e, _f = match2[7], offsetSign = _f === void 0 ? "Z" : _f, _g = match2[8], offsetHours = _g === void 0 ? "00" : _g, _h = match2[9], offsetMins = _h === void 0 ? "00" : _h;
       var tzOffset = offsetSign === "Z" ? "Z" : "" + offsetSign + offsetHours + ":" + offsetMins;
       var date2 = /* @__PURE__ */ new Date(year + "-" + month + "-" + day + "T" + hours + ":" + mins + ":" + secs + tzOffset);
       return date2;
@@ -579,11 +579,11 @@ var require_strings = __commonJS({
       var position = 0;
       var lastMatch;
       while (position < value.length) {
-        var match = value.substring(position).match(regex);
-        if (!match)
+        var match2 = value.substring(position).match(regex);
+        if (!match2)
           return { match: lastMatch, pos: position };
-        lastMatch = match;
-        position += ((_a = match.index) !== null && _a !== void 0 ? _a : 0) + match[0].length;
+        lastMatch = match2;
+        position += ((_a = match2.index) !== null && _a !== void 0 ? _a : 0) + match2[0].length;
       }
       return { match: lastMatch, pos: position };
     };
@@ -1861,7 +1861,7 @@ var require_deflate = __commonJS({
     function longest_match(s, cur_match) {
       var chain_length = s.max_chain_length;
       var scan = s.strstart;
-      var match;
+      var match2;
       var len;
       var best_len = s.prev_length;
       var nice_match = s.nice_match;
@@ -1879,14 +1879,14 @@ var require_deflate = __commonJS({
         nice_match = s.lookahead;
       }
       do {
-        match = cur_match;
-        if (_win[match + best_len] !== scan_end || _win[match + best_len - 1] !== scan_end1 || _win[match] !== _win[scan] || _win[++match] !== _win[scan + 1]) {
+        match2 = cur_match;
+        if (_win[match2 + best_len] !== scan_end || _win[match2 + best_len - 1] !== scan_end1 || _win[match2] !== _win[scan] || _win[++match2] !== _win[scan + 1]) {
           continue;
         }
         scan += 2;
-        match++;
+        match2++;
         do {
-        } while (_win[++scan] === _win[++match] && _win[++scan] === _win[++match] && _win[++scan] === _win[++match] && _win[++scan] === _win[++match] && _win[++scan] === _win[++match] && _win[++scan] === _win[++match] && _win[++scan] === _win[++match] && _win[++scan] === _win[++match] && scan < strend);
+        } while (_win[++scan] === _win[++match2] && _win[++scan] === _win[++match2] && _win[++scan] === _win[++match2] && _win[++scan] === _win[++match2] && _win[++scan] === _win[++match2] && _win[++scan] === _win[++match2] && _win[++scan] === _win[++match2] && _win[++scan] === _win[++match2] && scan < strend);
         len = MAX_MATCH - (strend - scan);
         scan = strend - MAX_MATCH;
         if (len > best_len) {
@@ -23296,7 +23296,9 @@ function minutes(t) {
   const [h, m] = t.split(":").map(Number);
   return h * 60 + m;
 }
+var isUnit = (a) => a.kind === "medical" || a.kind === "pwc" || a.kind === "boat";
 function shiftsOverlap(a, b) {
+  if (a.kind === "stand" !== (b.kind === "stand")) return false;
   if (!a.startTime || !a.endTime || !b.startTime || !b.endTime) return true;
   return minutes(a.startTime) < minutes(b.endTime) && minutes(b.startTime) < minutes(a.endTime);
 }
@@ -23327,6 +23329,21 @@ function checkAssignment(ctx, input) {
     });
   }
   const ignore = new Set(input.ignoreEntryIds ?? []);
+  if (isUnit(asg)) {
+    const from = asg.standFrom ? [...ctx.assignments.values()].find((a) => a.code === asg.standFrom) : void 0;
+    const onStand = ctx.entries.some((e) => {
+      if (e.date !== input.date || e.personnelId !== person.id || ignore.has(e.id)) return false;
+      const a = ctx.assignments.get(ctx.slots.get(e.slotId)?.assignmentId ?? -1);
+      return from ? a?.id === from.id : a?.kind === "stand";
+    });
+    if (!onStand) {
+      issues.push({
+        code: "not_on_stand",
+        overridable: true,
+        message: from ? `${person.lgNumber} isn't on ${from.displayName} that day. ${asg.displayName} takes its guards from ${from.displayName}.` : `${person.lgNumber} isn't on a stand that day. Units take their guards from the stands.`
+      });
+    }
+  }
   for (const e of ctx.entries) {
     if (e.date !== input.date || e.personnelId !== person.id || ignore.has(e.id) || e.slotId === slot.id) continue;
     const other = ctx.slots.get(e.slotId);
@@ -23344,7 +23361,12 @@ function checkAssignment(ctx, input) {
 function weekLoad(ctx, weekDatesList) {
   const inWeek = new Set(weekDatesList);
   const load = /* @__PURE__ */ new Map();
-  for (const e of ctx.entries) if (inWeek.has(e.date)) load.set(e.personnelId, (load.get(e.personnelId) ?? 0) + 1);
+  const days = /* @__PURE__ */ new Set();
+  for (const e of ctx.entries) if (inWeek.has(e.date)) days.add(`${e.personnelId}|${e.date}`);
+  for (const k of days) {
+    const pid = Number(k.split("|")[0]);
+    load.set(pid, (load.get(pid) ?? 0) + 1);
+  }
   return load;
 }
 function candidatesFor(ctx, date2, slotId, weekDatesList) {
@@ -23357,6 +23379,7 @@ function candidatesFor(ctx, date2, slotId, weekDatesList) {
     slot: { id: slot.id, name: slot.name, assignment: asg.displayName, criteria: slot.ruleText, presetName: slot.presetName },
     qualifiedAvailable: [],
     assignedElsewhere: [],
+    notOnStand: [],
     unqualified: [],
     unavailable: []
   };
@@ -23378,12 +23401,17 @@ function candidatesFor(ctx, date2, slotId, weekDatesList) {
     if (codes.has("unavailable")) groups.unavailable.push(c);
     else if (codes.has("unqualified")) groups.unqualified.push(c);
     else if (codes.has("double_booked")) groups.assignedElsewhere.push(c);
+    else if (codes.has("not_on_stand")) groups.notOnStand.push(c);
     else groups.qualifiedAvailable.push(c);
   }
   const byLoad = (a, b) => a.shiftsThisWeek - b.shiftsThisWeek || lgCompare(a.lgNumber, b.lgNumber);
   groups.qualifiedAvailable.sort(byLoad);
-  for (const g of [groups.assignedElsewhere, groups.unqualified, groups.unavailable]) g.sort((a, b) => lgCompare(a.lgNumber, b.lgNumber));
+  for (const g of [groups.assignedElsewhere, groups.notOnStand, groups.unqualified, groups.unavailable]) g.sort((a, b) => lgCompare(a.lgNumber, b.lgNumber));
   return groups;
+}
+function personType(lgNumber, shiftsOverride) {
+  const t = /^B\d/i.test(lgNumber) ? { label: "Supervisor", shiftsPerWeek: 4, hoursPerShift: 10, start: "08:00", end: "18:00" } : { label: "Lifeguard", shiftsPerWeek: 5, hoursPerShift: 8, start: "09:00", end: "17:00" };
+  return typeof shiftsOverride === "number" ? { ...t, shiftsPerWeek: shiftsOverride } : t;
 }
 function lgCompare(a, b) {
   const pa = a.replace(/\d+$/, "").toUpperCase();
@@ -23393,75 +23421,196 @@ function lgCompare(a, b) {
   const nb = Number(b.replace(/\D/g, ""));
   return na - nb || a.localeCompare(b);
 }
+function seededRandom(seed) {
+  let t = seed >>> 0;
+  return () => {
+    t = t + 1831565813 >>> 0;
+    let r = Math.imul(t ^ t >>> 15, 1 | t);
+    r = r + Math.imul(r ^ r >>> 7, 61 | r) ^ r;
+    return ((r ^ r >>> 14) >>> 0) / 4294967296;
+  };
+}
+var COST = { yesterday: 100, thisWeek: 25, lastTwoWeeks: 6, sameAsLastRun: 40, load: 30, jitter: 30, feedsUnit: -60 };
 function planAutoFill(ctx, opts) {
   const plan = { assign: [], remove: [], unfilled: [], keptLocked: 0, keptExisting: 0 };
+  const rnd = opts.random ?? Math.random;
   const load = weekLoad(ctx, opts.weekDates);
   const assignments = [...ctx.assignments.values()].sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
+  const asgOf = (slotId) => ctx.assignments.get(ctx.slots.get(slotId)?.assignmentId ?? -1);
+  const kindOf = (slotId) => asgOf(slotId)?.kind;
+  const target = (p) => personType(p.lgNumber, p.shiftsPerWeek).shiftsPerWeek;
+  const byCode = (code) => code ? assignments.find((a) => a.code === code) : void 0;
+  const removing = /* @__PURE__ */ new Set();
+  if (!opts.onlyEmpty) {
+    for (const e of ctx.entries) if (opts.dates.includes(e.date) && !e.locked) removing.add(e.id);
+  }
+  const worked = /* @__PURE__ */ new Map();
+  const mark = (date2, pid, asgId) => {
+    const d = worked.get(date2) ?? worked.set(date2, /* @__PURE__ */ new Map()).get(date2);
+    (d.get(pid) ?? d.set(pid, /* @__PURE__ */ new Set()).get(pid)).add(asgId);
+  };
+  for (const h of opts.history ?? []) mark(h.date, h.personnelId, h.assignmentId);
+  for (const e of ctx.entries) if (!removing.has(e.id)) {
+    const a = asgOf(e.slotId);
+    if (a) mark(e.date, e.personnelId, a.id);
+  }
+  const prevRun = new Set((opts.previous ?? []).map((x) => `${x.date}|${x.slotId}|${x.personnelId}`));
+  const weekSet = new Set(opts.weekDates);
+  const dayBefore = (date2) => new Date(Date.parse(date2 + "T12:00:00Z") - 864e5).toISOString().slice(0, 10);
+  const timesOn = (pid, asgId, inWeek, date2) => {
+    let n = 0;
+    for (const [d, m] of worked) if (d !== date2 && weekSet.has(d) === inWeek && m.get(pid)?.has(asgId)) n++;
+    return n;
+  };
+  const rank = /* @__PURE__ */ new Map();
+  (opts.standPriority ?? []).forEach((group, gi) => {
+    const shuffled = [...group].sort(() => rnd() - 0.5);
+    shuffled.forEach((code, j) => rank.set(code, gi * 10 + j));
+  });
+  const rankOf = (a) => rank.get(a.code) ?? 1e3 + a.sortOrder;
   for (const date2 of opts.dates) {
-    const dayEntries = ctx.entries.filter((e) => e.date === date2);
-    const kept = [];
-    for (const e of dayEntries) {
+    const day = [];
+    for (const e of ctx.entries.filter((x) => x.date === date2)) {
       if (e.locked) {
         plan.keptLocked++;
-        kept.push(e);
+        day.push(e);
       } else if (opts.onlyEmpty) {
         plan.keptExisting++;
-        kept.push(e);
-      } else {
-        plan.remove.push(e.id);
-        load.set(e.personnelId, (load.get(e.personnelId) ?? 1) - 1);
-      }
+        day.push(e);
+      } else plan.remove.push(e.id);
     }
-    const filledSlots = new Set(kept.map((e) => e.slotId));
-    const busyPeople = new Set(kept.map((e) => e.personnelId));
-    const open = [];
-    for (const asg of assignments) {
-      if (!isOpen(ctx, asg.id, date2)) continue;
-      for (const slot of activeSlots(ctx, asg, date2)) {
-        if (filledSlots.has(slot.id)) continue;
-        const eligible = [...ctx.personnel.values()].filter(
-          (p) => !busyPeople.has(p.id) && availability(p, date2).available && evaluate(slot.rule, p.certs)
-        );
-        open.push({ slot, asg, eligible });
-      }
+    if (!opts.onlyEmpty) {
+      const dropped = new Set(ctx.entries.filter((x) => x.date === date2 && removing.has(x.id)).map((x) => x.personnelId));
+      for (const pid of dropped) if (!day.some((d) => d.personnelId === pid)) load.set(pid, Math.max(0, (load.get(pid) ?? 1) - 1));
     }
-    const flexibility = /* @__PURE__ */ new Map();
-    for (const o of open) for (const p of o.eligible) flexibility.set(p.id, (flexibility.get(p.id) ?? 0) + 1);
-    for (const o of open) {
-      o.eligible.sort(
-        (a, b) => (load.get(a.id) ?? 0) - (load.get(b.id) ?? 0) || (flexibility.get(a.id) ?? 0) - (flexibility.get(b.id) ?? 0) || lgCompare(a.lgNumber, b.lgNumber)
-      );
-    }
-    open.sort((a, b) => a.eligible.length - b.eligible.length || a.asg.sortOrder - b.asg.sortOrder || a.slot.position - b.slot.position);
-    const personToSlot = /* @__PURE__ */ new Map();
-    const slotToPerson = /* @__PURE__ */ new Map();
-    const tryAssign = (i, seen) => {
-      for (const p of open[i].eligible) {
-        if (seen.has(p.id)) continue;
-        seen.add(p.id);
-        const holder = personToSlot.get(p.id);
-        if (holder === void 0 || tryAssign(holder, seen)) {
-          personToSlot.set(p.id, i);
-          slotToPerson.set(i, p.id);
-          return true;
-        }
-      }
-      return false;
+    const filled = () => new Set(day.map((d) => d.slotId));
+    const onStand = () => new Set(day.filter((d) => kindOf(d.slotId) === "stand").map((d) => d.personnelId));
+    const onUnit = () => new Set(day.filter((d) => kindOf(d.slotId) !== "stand").map((d) => d.personnelId));
+    const take = (slotId, pid) => {
+      if (!onStand().has(pid) && !onUnit().has(pid)) load.set(pid, (load.get(pid) ?? 0) + 1);
+      day.push({ slotId, personnelId: pid });
+      plan.assign.push({ date: date2, slotId, personnelId: pid });
+      const a = asgOf(slotId);
+      if (a) mark(date2, pid, a.id);
     };
-    open.forEach((_, i) => tryAssign(i, /* @__PURE__ */ new Set()));
-    open.forEach((o, i) => {
-      const pid = slotToPerson.get(i);
-      if (pid !== void 0) {
-        plan.assign.push({ date: date2, slotId: o.slot.id, personnelId: pid });
-        load.set(pid, (load.get(pid) ?? 0) + 1);
-      } else {
-        plan.unfilled.push({ date: date2, slotId: o.slot.id, assignment: o.asg.displayName, slot: o.slot.name, reason: unfilledReason(ctx, o.slot, date2, o.eligible.length) });
+    const yesterday = dayBefore(date2);
+    const jit = /* @__PURE__ */ new Map();
+    const cost = (p, slot, extra = 0) => {
+      const a = ctx.assignments.get(slot.assignmentId);
+      const k = `${p.id}|${slot.id}`;
+      if (!jit.has(k)) jit.set(k, rnd() * COST.jitter);
+      return (load.get(p.id) ?? 0) * COST.load + (worked.get(yesterday)?.get(p.id)?.has(a.id) ? COST.yesterday : 0) + timesOn(p.id, a.id, true, date2) * COST.thisWeek + timesOn(p.id, a.id, false, date2) * COST.lastTwoWeeks + (prevRun.has(`${date2}|${slot.id}|${p.id}`) ? COST.sameAsLastRun : 0) + jit.get(k) + extra;
+    };
+    const openSlots = (want, required) => {
+      const out = [];
+      const f = filled();
+      for (const asg of assignments) {
+        if (!want(asg) || !isOpen(ctx, asg.id, date2)) continue;
+        const active = activeSlots(ctx, asg, date2);
+        const list2 = required ? active.slice(0, asg.minGuards ?? active.length) : active.slice(asg.minGuards ?? active.length);
+        for (const slot of list2) if (!f.has(slot.id)) out.push({ slot, asg });
       }
+      return out;
+    };
+    const people = [...ctx.personnel.values()];
+    const feeders = /* @__PURE__ */ new Map();
+    for (const u of assignments) if (isUnit(u) && u.standFrom && isOpen(ctx, u.id, date2) && (u.minGuards ?? 0) > 0) (feeders.get(u.standFrom) ?? feeders.set(u.standFrom, []).get(u.standFrom)).push(u);
+    const feedBonus = (p, stand) => (feeders.get(stand.code) ?? []).some((u) => activeSlots(ctx, u, date2).slice(0, u.minGuards).some((s) => evaluate(s.rule, p.certs))) ? COST.feedsUnit : 0;
+    const standFree = (p) => !onStand().has(p.id) && availability(p, date2).available && (load.get(p.id) ?? 0) < target(p);
+    const standRows = openSlots((a) => a.kind === "stand", true).sort((x, y) => rankOf(x.asg) - rankOf(y.asg) || x.slot.position - y.slot.position);
+    const spareRows = (opts.spareStands ?? []).flatMap((code) => {
+      const asg = byCode(code);
+      return asg ? openSlots((a) => a.id === asg.id, false) : [];
     });
+    const unfilledBefore = plan.unfilled.length;
+    match([...standRows, ...spareRows], (slot) => people.filter((p) => standFree(p) && evaluate(slot.rule, p.certs)), (p, slot) => cost(p, slot, feedBonus(p, ctx.assignments.get(slot.assignmentId))), take, plan, ctx, date2, true);
+    const spareIds = new Set(spareRows.map((r) => r.slot.id));
+    plan.unfilled.splice(unfilledBefore, plan.unfilled.length - unfilledBefore, ...plan.unfilled.slice(unfilledBefore).filter((u) => !spareIds.has(u.slotId)));
+    const onStandOf = (standId) => new Set(day.filter((d) => ctx.slots.get(d.slotId)?.assignmentId === standId).map((d) => d.personnelId));
+    match(
+      openSlots((a) => isUnit(a), true),
+      (slot) => {
+        const from = byCode(ctx.assignments.get(slot.assignmentId)?.standFrom);
+        const pool = from ? onStandOf(from.id) : onStand();
+        return people.filter((p) => pool.has(p.id) && !onUnit().has(p.id) && evaluate(slot.rule, p.certs));
+      },
+      cost,
+      take,
+      plan,
+      ctx,
+      date2,
+      false
+    );
+    match(openSlots((a) => a.kind === "extra", true), (slot) => people.filter((p) => !onUnit().has(p.id) && availability(p, date2).available && (onStand().has(p.id) || (load.get(p.id) ?? 0) < target(p)) && evaluate(slot.rule, p.certs)), cost, take, plan, ctx, date2, false);
   }
   return plan;
 }
+function match(open, eligibleFor, costOf, take, plan, ctx, date2, inOrder) {
+  const rows = open.map((o) => {
+    const eligible = eligibleFor(o.slot);
+    const c = new Map(eligible.map((p) => [p.id, costOf(p, o.slot)]));
+    eligible.sort((a, b) => c.get(a.id) - c.get(b.id));
+    return { ...o, eligible, c };
+  });
+  if (!inOrder) rows.sort((a, b) => a.eligible.length - b.eligible.length || a.asg.sortOrder - b.asg.sortOrder || a.slot.position - b.slot.position);
+  const personTo = /* @__PURE__ */ new Map();
+  const slotTo = /* @__PURE__ */ new Map();
+  const tryAssign = (i, seen) => {
+    for (const p of rows[i].eligible) {
+      if (seen.has(p.id)) continue;
+      seen.add(p.id);
+      const holder = personTo.get(p.id);
+      if (holder === void 0 || tryAssign(holder, seen)) {
+        personTo.set(p.id, i);
+        slotTo.set(i, p.id);
+        return true;
+      }
+    }
+    return false;
+  };
+  rows.forEach((_, i) => tryAssign(i, /* @__PURE__ */ new Set()));
+  for (let pass = 0, better = true; better && pass < 40; pass++) {
+    better = false;
+    const filledRows = [...slotTo.keys()];
+    for (const i of filledRows) {
+      for (const j of filledRows) {
+        if (j <= i) continue;
+        const a = slotTo.get(i), b = slotTo.get(j);
+        const ca = rows[i].c, cb = rows[j].c;
+        if (!cb.has(a) || !ca.has(b)) continue;
+        if (ca.get(b) + cb.get(a) < ca.get(a) + cb.get(b) - 0.01) {
+          slotTo.set(i, b);
+          slotTo.set(j, a);
+          personTo.set(b, i);
+          personTo.set(a, j);
+          better = true;
+        }
+      }
+      const cur = slotTo.get(i);
+      for (const q of rows[i].eligible) {
+        if (personTo.has(q.id)) continue;
+        if (rows[i].c.get(q.id) < rows[i].c.get(slotTo.get(i)) - 0.01) {
+          personTo.delete(slotTo.get(i));
+          slotTo.set(i, q.id);
+          personTo.set(q.id, i);
+          better = true;
+        }
+      }
+      void cur;
+    }
+  }
+  rows.forEach((r, i) => {
+    const pid = slotTo.get(i);
+    if (pid !== void 0) take(r.slot.id, pid);
+    else plan.unfilled.push({ date: date2, slotId: r.slot.id, assignment: r.asg.displayName, slot: r.slot.name, reason: unfilledReason(ctx, r.slot, date2, r.eligible.length) });
+  });
+}
 function unfilledReason(ctx, slot, date2, eligibleCount) {
+  const unitAsg = ctx.assignments.get(slot.assignmentId);
+  if (unitAsg && isUnit(unitAsg) && eligibleCount === 0) {
+    const from = unitAsg.standFrom ? [...ctx.assignments.values()].find((a) => a.code === unitAsg.standFrom) : void 0;
+    return `No guard on ${from ? from.displayName : "a stand"} that day meets ${slot.ruleText}.`;
+  }
   if (eligibleCount > 0) return `Every lifeguard who meets ${slot.ruleText} was needed for another slot.`;
   const qualified = [...ctx.personnel.values()].filter((p) => p.active && evaluate(slot.rule, p.certs));
   if (qualified.length === 0) return `No active lifeguard meets ${slot.ruleText}.`;
@@ -23479,17 +23628,19 @@ function buildWeekFromContext(ctx, weekStart, status = "draft", publishedAt = nu
     const views = assignments.map((a) => {
       const open = isOpen(ctx, a.id, date2);
       if (!open) stats.closedAssignments++;
-      const slots = activeSlots(ctx, a, date2).map((s) => {
+      const min = a.minGuards ?? a.slots.length;
+      const slots = activeSlots(ctx, a, date2).map((s, i) => {
         const e = entryAt.get(`${date2}|${s.id}`);
-        if (open) stats.openSlots++;
+        const required = i < min;
+        if (open && (required || e)) stats.openSlots++;
         if (!e) {
-          if (open) stats.empty++;
+          if (open && required) stats.empty++;
           return { slotId: s.id, name: s.name, position: s.position, criteria: s.ruleText, presetName: s.presetName, entry: null };
         }
         const p = ctx.personnel.get(e.personnelId);
         const issues = checkAssignment(ctx, { date: date2, slotId: s.id, personnelId: p.id, ignoreEntryIds: [e.id] });
         if (open) stats.filled++;
-        if (issues.length && !(e.overrideReason && issues.every((i) => i.overridable))) stats.conflicts++;
+        if (issues.length && !(e.overrideReason && issues.every((i2) => i2.overridable))) stats.conflicts++;
         return {
           slotId: s.id,
           name: s.name,
@@ -23505,11 +23656,12 @@ function buildWeekFromContext(ctx, weekStart, status = "draft", publishedAt = nu
             locked: e.locked,
             source: e.source,
             overrideReason: e.overrideReason,
-            issues
+            issues,
+            alsoOn: a.kind === "stand" ? ctx.entries.filter((x) => x.date === date2 && x.personnelId === p.id && x.id !== e.id).map((x) => ctx.assignments.get(ctx.slots.get(x.slotId)?.assignmentId ?? -1)).filter((u) => u && u.kind !== "stand").map((u) => u.short ?? u.displayName) : []
           }
         };
       });
-      return { assignmentId: a.id, code: a.code, kind: a.kind, displayName: a.displayName, open, capacity: a.slots.length, slots };
+      return { assignmentId: a.id, code: a.code, kind: a.kind, displayName: a.displayName, open, capacity: a.slots.length, min, short: a.short ?? a.displayName, slots };
     });
     totals.openSlots += stats.openSlots;
     totals.filled += stats.filled;
@@ -24532,6 +24684,7 @@ function registerSchedule(r, db2) {
     const scope = oneOf(b, "scope", ["week", "day"]);
     const onlyEmpty = optBool(b, "onlyEmpty") ?? true;
     const dryRun = optBool(b, "dryRun") ?? false;
+    const seed = typeof b.seed === "number" && Number.isFinite(b.seed) ? b.seed : void 0;
     const days = weekDates(start);
     let dates = days;
     if (scope === "day") {
@@ -24541,7 +24694,7 @@ function registerSchedule(r, db2) {
     }
     const result = tx(db2, () => {
       const ctx = loadContext(db2, start, days[6]);
-      const plan = planAutoFill(ctx, { dates, weekDates: days, onlyEmpty });
+      const plan = planAutoFill(ctx, { dates, weekDates: days, onlyEmpty, random: seed === void 0 ? void 0 : seededRandom(seed) });
       if (!dryRun) {
         for (const id of plan.remove) run(db2, "DELETE FROM schedule_entries WHERE id = ? AND locked = 0", id);
         for (const a of plan.assign) {
