@@ -23263,6 +23263,15 @@ function registerAssignments(r, db2) {
 }
 
 // src/domain/scheduling.ts
+function feederStands(asg) {
+  return asg.standsFrom?.length ? asg.standsFrom : asg.standFrom ? [asg.standFrom] : [];
+}
+function standsLabel(codes) {
+  const nums = codes.map((c) => Number(c.replace(/\D/g, ""))).sort((a, b) => a - b);
+  if (nums.length === 1) return `Stand ${nums[0]}`;
+  if (nums.every((n, i) => i === 0 || n === nums[i - 1] + 1)) return `Stands ${nums[0]}\u2013${nums[nums.length - 1]}`;
+  return `Stands ${nums.slice(0, -1).join(", ")} and ${nums[nums.length - 1]}`;
+}
 function activeSlots(ctx, asg, date2) {
   const n = ctx.slotLimit?.get(`${asg.id}|${date2}`);
   return n === void 0 ? asg.slots : asg.slots.slice(0, Math.max(0, n));
@@ -23330,17 +23339,20 @@ function checkAssignment(ctx, input) {
   }
   const ignore = new Set(input.ignoreEntryIds ?? []);
   if (isUnit(asg)) {
-    const from = asg.standFrom ? [...ctx.assignments.values()].find((a) => a.code === asg.standFrom) : void 0;
-    const onStand = ctx.entries.some((e) => {
-      if (e.date !== input.date || e.personnelId !== person.id || ignore.has(e.id)) return false;
-      const a = ctx.assignments.get(ctx.slots.get(e.slotId)?.assignmentId ?? -1);
-      return from ? a?.id === from.id : a?.kind === "stand";
-    });
-    if (!onStand) {
+    const allowed = feederStands(asg);
+    const myStands = ctx.entries.filter((e) => e.date === input.date && e.personnelId === person.id && !ignore.has(e.id)).map((e) => ctx.assignments.get(ctx.slots.get(e.slotId)?.assignmentId ?? -1)).filter((a) => a?.kind === "stand");
+    if (!myStands.length) {
       issues.push({
         code: "not_on_stand",
         overridable: true,
-        message: from ? `${person.lgNumber} isn't on ${from.displayName} that day. ${asg.displayName} takes its guards from ${from.displayName}.` : `${person.lgNumber} isn't on a stand that day. Units take their guards from the stands.`
+        message: allowed.length ? `${person.lgNumber} isn't on a stand that day. ${asg.displayName} takes its guards from ${standsLabel(allowed)}.` : `${person.lgNumber} isn't on a stand that day. Units take their guards from the stands.`
+      });
+    } else if (allowed.length && !myStands.some((a) => allowed.includes(a.code))) {
+      const where = myStands.map((a) => a.displayName).join(", ");
+      issues.push({
+        code: allowed.length === 1 ? "not_on_stand" : "too_far",
+        overridable: true,
+        message: allowed.length === 1 ? `${person.lgNumber} is on ${where}, not ${standsLabel(allowed)}. ${asg.displayName} takes its guards from ${standsLabel(allowed)}.` : `Too far: ${person.lgNumber} is on ${where}. ${asg.displayName} takes its guards from ${standsLabel(allowed)}.`
       });
     }
   }
@@ -23380,6 +23392,7 @@ function candidatesFor(ctx, date2, slotId, weekDatesList) {
     qualifiedAvailable: [],
     assignedElsewhere: [],
     notOnStand: [],
+    tooFar: [],
     unqualified: [],
     unavailable: []
   };
@@ -23402,11 +23415,12 @@ function candidatesFor(ctx, date2, slotId, weekDatesList) {
     else if (codes.has("unqualified")) groups.unqualified.push(c);
     else if (codes.has("double_booked")) groups.assignedElsewhere.push(c);
     else if (codes.has("not_on_stand")) groups.notOnStand.push(c);
+    else if (codes.has("too_far")) groups.tooFar.push(c);
     else groups.qualifiedAvailable.push(c);
   }
   const byLoad = (a, b) => a.shiftsThisWeek - b.shiftsThisWeek || lgCompare(a.lgNumber, b.lgNumber);
   groups.qualifiedAvailable.sort(byLoad);
-  for (const g of [groups.assignedElsewhere, groups.notOnStand, groups.unqualified, groups.unavailable]) g.sort((a, b) => lgCompare(a.lgNumber, b.lgNumber));
+  for (const g of [groups.assignedElsewhere, groups.notOnStand, groups.tooFar, groups.unqualified, groups.unavailable]) g.sort((a, b) => lgCompare(a.lgNumber, b.lgNumber));
   return groups;
 }
 function personType(lgNumber, shiftsOverride) {
@@ -23430,7 +23444,7 @@ function seededRandom(seed) {
     return ((r ^ r >>> 14) >>> 0) / 4294967296;
   };
 }
-var COST = { yesterday: 100, thisWeek: 25, lastTwoWeeks: 6, sameAsLastRun: 40, load: 30, jitter: 30, feedsUnit: -60 };
+var COST = { yesterday: 100, thisWeek: 25, lastTwoWeeks: 6, sameAsLastRun: 40, load: 30, jitter: 30, feedsOnlyStand: -150, feedsUnit: -45 };
 function planAutoFill(ctx, opts) {
   const plan = { assign: [], remove: [], unfilled: [], keptLocked: 0, keptExisting: 0 };
   const rnd = opts.random ?? Math.random;
@@ -23514,8 +23528,11 @@ function planAutoFill(ctx, opts) {
     };
     const people = [...ctx.personnel.values()];
     const feeders = /* @__PURE__ */ new Map();
-    for (const u of assignments) if (isUnit(u) && u.standFrom && isOpen(ctx, u.id, date2) && (u.minGuards ?? 0) > 0) (feeders.get(u.standFrom) ?? feeders.set(u.standFrom, []).get(u.standFrom)).push(u);
-    const feedBonus = (p, stand) => (feeders.get(stand.code) ?? []).some((u) => activeSlots(ctx, u, date2).slice(0, u.minGuards).some((s) => evaluate(s.rule, p.certs))) ? COST.feedsUnit : 0;
+    for (const u of assignments) if (isUnit(u) && isOpen(ctx, u.id, date2) && (u.minGuards ?? 0) > 0) for (const code of feederStands(u)) (feeders.get(code) ?? feeders.set(code, []).get(code)).push(u);
+    const feedBonus = (p, stand) => (feeders.get(stand.code) ?? []).reduce((sum, u) => {
+      if (!activeSlots(ctx, u, date2).slice(0, u.minGuards).some((s) => evaluate(s.rule, p.certs))) return sum;
+      return sum + (feederStands(u).length === 1 ? COST.feedsOnlyStand : COST.feedsUnit);
+    }, 0);
     const standFree = (p) => !onStand().has(p.id) && availability(p, date2).available && (load.get(p.id) ?? 0) < target(p);
     const standRows = openSlots((a) => a.kind === "stand", true).sort((x, y) => rankOf(x.asg) - rankOf(y.asg) || x.slot.position - y.slot.position);
     const spareRows = (opts.spareStands ?? []).flatMap((code) => {
@@ -23530,8 +23547,8 @@ function planAutoFill(ctx, opts) {
     match(
       openSlots((a) => isUnit(a), true),
       (slot) => {
-        const from = byCode(ctx.assignments.get(slot.assignmentId)?.standFrom);
-        const pool = from ? onStandOf(from.id) : onStand();
+        const allowed = feederStands(ctx.assignments.get(slot.assignmentId)).map(byCode).filter((a) => !!a);
+        const pool = allowed.length ? new Set(allowed.flatMap((a) => [...onStandOf(a.id)])) : onStand();
         return people.filter((p) => pool.has(p.id) && !onUnit().has(p.id) && evaluate(slot.rule, p.certs));
       },
       cost,
@@ -23608,8 +23625,8 @@ function match(open, eligibleFor, costOf, take, plan, ctx, date2, inOrder) {
 function unfilledReason(ctx, slot, date2, eligibleCount) {
   const unitAsg = ctx.assignments.get(slot.assignmentId);
   if (unitAsg && isUnit(unitAsg) && eligibleCount === 0) {
-    const from = unitAsg.standFrom ? [...ctx.assignments.values()].find((a) => a.code === unitAsg.standFrom) : void 0;
-    return `No guard on ${from ? from.displayName : "a stand"} that day meets ${slot.ruleText}.`;
+    const allowed = feederStands(unitAsg);
+    return `No guard on ${allowed.length ? standsLabel(allowed) : "a stand"} that day meets ${slot.ruleText}.`;
   }
   if (eligibleCount > 0) return `Every lifeguard who meets ${slot.ruleText} was needed for another slot.`;
   const qualified = [...ctx.personnel.values()].filter((p) => p.active && evaluate(slot.rule, p.certs));
