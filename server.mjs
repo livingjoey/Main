@@ -24058,7 +24058,7 @@ var import_pdf_lib = __toESM(require_cjs(), 1);
 var LAYOUTS = ["week-grid", "daily-sheet", "roster", "by-assignment"];
 var PAPERS = { letter: [612, 792], legal: [612, 1008], tabloid: [792, 1224], a4: [595.28, 841.89], a3: [841.89, 1190.55] };
 var LAYOUT_INFO = {
-  "week-grid": { label: "Week grid", description: "Days down the side, stands and units across \u2014 matches the Schedule Builder.", defaultOrientation: "landscape" },
+  "week-grid": { label: "Week grid", description: "Matches the scheduler: stands, squads, jet skis and boats on one page, guards on duty and day notes, then hours worked per guard.", defaultOrientation: "landscape" },
   "daily-sheet": { label: "Daily posting sheet", description: "One page per day with every assignment, slot and lifeguard.", defaultOrientation: "portrait" },
   roster: { label: "Lifeguard roster", description: "One row per lifeguard showing where they are each day or why they are off.", defaultOrientation: "landscape" },
   "by-assignment": { label: "By assignment", description: "One block per stand or unit, slots down the side and days across.", defaultOrientation: "landscape" }
@@ -24292,34 +24292,184 @@ var DAY_NAMES = { sat: "Saturday", sun: "Sunday", mon: "Monday", tue: "Tuesday",
 var short = (iso) => `${MONTHS[Number(iso.slice(5, 7)) - 1]} ${Number(iso.slice(8, 10))}`;
 var fmtRange = (a, b) => `Sat ${short(a)} \u2013 Fri ${short(b)}, ${b.slice(0, 4)}`;
 var dayLabel = (iso, wd) => `${DAY_NAMES[wd]}, ${short(iso)}`;
-var KIND_TITLES = { stand: "Stands", medical: "Medical units", pwc: "PWC units", boat: "Rescue boats", extra: "Extra assignments" };
+var KIND_TITLES = { stand: "Stands", medical: "Squads", pwc: "Jet Skis", boat: "Boats", extra: "Events" };
 var OFF_SHORT = { regular_day_off: "OFF", vacation: "VAC", leave: "LEAVE", training: "TRAIN", other: "OTHER", inactive: "INACTIVE" };
 function entryChip(opts, e) {
   const surname = e.name.trim().split(/\s+/).slice(-1)[0] ?? "";
   const withName = opts.showNames && surname && !/^\d+$/.test(surname);
   return { kind: "chip", text: withName ? `${e.lgNumber} ${surname}` : e.lgNumber, label: e.labelColor, mark: `${e.locked ? "*" : ""}${e.overrideReason ? "!" : ""}` };
 }
-function weekGrid(r, week, opts) {
+function onDuty(day) {
+  return new Set(day.assignments.flatMap((a) => a.slots.flatMap((s) => s.entry ? [s.entry.personnelId] : []))).size;
+}
+function printedSlots(a, showEmpty) {
+  return a.slots.filter((s, i) => s.entry || showEmpty && i < a.min);
+}
+function weekGrid(r, week, opts, ctx) {
   const days = week.days.filter((d) => opts.dates.includes(d.date));
-  for (const kind of opts.kinds) {
-    const sample = days[0]?.assignments.filter((a) => a.kind === kind) ?? [];
-    if (!sample.length) continue;
-    r.newPage(KIND_TITLES[kind]);
-    const columns = [{ title: "Day", weight: 1.1 }, ...sample.map((a) => ({ title: a.displayName, weight: Math.max(1, Math.ceil(a.capacity / 3)) }))];
-    const rows = days.map((d) => [
-      { items: [{ kind: "text", text: DAY_NAMES[d.weekday], bold: true }, { kind: "text", text: short(d.date), color: C.muted }], fill: C.head },
-      ...d.assignments.filter((a) => a.kind === kind).map((a) => {
-        if (!a.open) return { items: [{ kind: "text", text: "CLOSED", bold: true, color: C.muted }], fill: C.closed };
-        const items = [];
-        for (const s of a.slots) {
-          if (s.entry) items.push(entryChip(opts, s.entry));
-          else if (opts.showEmpty) items.push({ kind: "chip", text: "OPEN", label: null, open: true });
-        }
-        return { items };
-      })
-    ]);
-    r.table(columns, rows, { minRow: 40 });
+  if (!days.length) return;
+  const sample = days[0].assignments;
+  const bands = [
+    { kind: "stand", label: "STANDS" },
+    { kind: "medical", label: "SQUADS" },
+    { kind: "pwc", label: "JET SKIS" },
+    { kind: "boat", label: "BOATS" },
+    { kind: "extra", label: "EVENTS" }
+  ];
+  const cols = [];
+  for (const band of bands) {
+    if (!opts.kinds.includes(band.kind)) continue;
+    const list2 = sample.filter((a) => a.kind === band.kind);
+    if (!list2.length) continue;
+    if (band.kind === "boat" || band.kind === "extra") {
+      const used = band.kind === "boat" || days.some((d) => d.assignments.some((a) => a.kind === "extra" && a.slots.some((s) => s.entry)));
+      if (used) cols.push({ band: band.label, label: "", weight: 1.7, ids: list2.map((a) => a.assignmentId), merged: true });
+      continue;
+    }
+    for (const a of list2) cols.push({ band: band.label, label: a.displayName.match(/(\d+)\s*$/)?.[1] ?? a.displayName, weight: a.kind === "stand" && a.capacity > 3 ? 1.9 : 1, ids: [a.assignmentId], merged: false });
   }
+  r.newPage();
+  const { reg, bold } = r.fonts;
+  const left = MARGIN;
+  const usable = r.width - MARGIN * 2;
+  const dayW = 66;
+  const total = cols.reduce((s, c) => s + c.weight, 0);
+  const widths = cols.map((c) => (usable - dayW) / total * c.weight);
+  const xs = [];
+  cols.reduce((x, _, i) => (xs.push(x), x + widths[i]), left + dayW);
+  const header = () => {
+    let i = 0;
+    while (i < cols.length) {
+      let j = i;
+      while (j + 1 < cols.length && cols[j + 1].band === cols[i].band) j++;
+      const x = xs[i];
+      const w = xs[j] + widths[j] - x;
+      const label = cols[i].band === "STANDS" ? `STANDS ${cols[i].label}\u2013${cols[j].label}` : cols[i].band;
+      r.text(r.page, label, x + 3, r.y - 9, 7, bold, C.navy);
+      r.page.drawRectangle({ x: x + 1, y: r.y - 13, width: w - 2, height: 1.2, color: C.navy });
+      i = j + 1;
+    }
+    r.y -= 16;
+    const h = 18;
+    r.page.drawRectangle({ x: left, y: r.y - h, width: dayW, height: h, color: C.head, borderColor: C.line, borderWidth: 0.5 });
+    r.text(r.page, "DAY", left + PAD, r.y - h + 6, 7, bold, C.muted);
+    cols.forEach((c, i2) => {
+      r.page.drawRectangle({ x: xs[i2], y: r.y - h, width: widths[i2], height: h, color: C.head, borderColor: C.line, borderWidth: 0.5 });
+      if (c.label) {
+        const t = r.fit(c.label, bold, 11, widths[i2] - 4);
+        r.text(r.page, t, xs[i2] + (widths[i2] - bold.widthOfTextAtSize(t, 11)) / 2, r.y - h + 5, 11, bold, C.ink);
+      }
+    });
+    r.y -= h;
+  };
+  header();
+  const byId = (d) => new Map(d.assignments.map((a) => [a.assignmentId, a]));
+  const cellFor = (d, c) => {
+    const m = byId(d);
+    const list2 = c.ids.map((id) => m.get(id)).filter(Boolean);
+    if (!c.merged) {
+      const a = list2[0];
+      if (!a.open) return { items: [{ kind: "text", text: "CLOSED", bold: true, size: 6.5, color: C.muted }], fill: C.closed };
+      return { items: printedSlots(a, opts.showEmpty).map((s) => s.entry ? entryChip(opts, s.entry) : { kind: "chip", text: "OPEN", label: null, open: true }) };
+    }
+    const items = [];
+    for (const a of list2) {
+      const used = a.slots.some((s) => s.entry);
+      if (!a.open || !used && a.min === 0) continue;
+      items.push({ kind: "text", text: a.short ?? a.displayName, bold: true, size: 6.5, color: C.navy });
+      for (const s of printedSlots(a, opts.showEmpty)) {
+        items.push(s.entry ? { ...entryChip(opts, s.entry), after: a.kind === "boat" && s.name === "Captain" ? "Capt" : void 0 } : { kind: "chip", text: "OPEN", label: null, open: true });
+      }
+    }
+    if (!items.length) items.push({ kind: "text", text: "\u2014", color: C.muted });
+    return { items };
+  };
+  const noteFill = hex("#FFF6D6");
+  for (const d of days) {
+    const cells = cols.map((c) => cellFor(d, c));
+    const note = opts.notes?.[d.date]?.trim();
+    const dayCell = {
+      items: [
+        { kind: "text", text: DAY_NAMES[d.weekday], bold: true, size: 8.5 },
+        { kind: "text", text: short(d.date), color: C.muted, size: 7.5 },
+        { kind: "text", text: `${onDuty(d)} on duty`, bold: true, size: 7.5, color: C.navy }
+      ],
+      fill: C.head
+    };
+    const h = Math.max(36, r.layout(dayCell, left, r.y, dayW, false), ...cells.map((c, i) => r.layout(c, xs[i], r.y, widths[i], false)));
+    const noteLines = note ? r.wrap(`Note: ${note}`, reg, 7, usable - dayW - PAD * 2) : [];
+    const noteH = noteLines.length ? noteLines.length * 9 + 5 : 0;
+    if (r.y - h - noteH < MARGIN + 18) {
+      r.newPage();
+      header();
+    }
+    r.page.drawRectangle({ x: left, y: r.y - h - noteH, width: dayW, height: h + noteH, color: C.head, borderColor: C.line, borderWidth: 0.5 });
+    r.layout(dayCell, left, r.y, dayW, true);
+    cells.forEach((c, i) => {
+      r.page.drawRectangle({ x: xs[i], y: r.y - h, width: widths[i], height: h, color: c.fill ?? C.white, borderColor: C.line, borderWidth: 0.5 });
+      r.layout(c, xs[i], r.y, widths[i], true);
+    });
+    r.y -= h;
+    if (noteH) {
+      r.page.drawRectangle({ x: left + dayW, y: r.y - noteH, width: usable - dayW, height: noteH, color: noteFill, borderColor: hex("#E8CF6A"), borderWidth: 0.5 });
+      noteLines.forEach((line, k) => {
+        const [lead, ...rest] = [line.startsWith("Note:") ? "Note:" : "", line.startsWith("Note:") ? line.slice(5) : line];
+        if (lead) r.text(r.page, lead, left + dayW + PAD, r.y - 9 - k * 9, 7, bold, hex("#5C4700"));
+        r.text(r.page, rest.join(""), left + dayW + PAD + (lead ? bold.widthOfTextAtSize("Note:", 7) : 0), r.y - 9 - k * 9, 7, reg, hex("#5C4700"));
+      });
+      r.y -= noteH;
+    }
+  }
+  r.y -= 12;
+  if (opts.hoursGrid !== false) hoursGrid(r, days, ctx);
+}
+function hoursGrid(r, days, ctx) {
+  const people = [...ctx.personnel.values()].filter((p) => p.active || days.some((d) => d.assignments.some((a) => a.slots.some((s) => s.entry?.personnelId === p.id)))).sort((a, b) => lgCompare(a.lgNumber, b.lgNumber));
+  if (!people.length) return;
+  if (r.y < MARGIN + 140) r.newPage();
+  r.text(r.page, "Hours worked", MARGIN, r.y - 11, 11, r.fonts.bold, C.ink);
+  r.text(r.page, "Hours on duty each day. OFF regular day off \xB7 VAC vacation \xB7 LEAVE \xB7 TRAIN training \xB7 OTHER \xB7 \u2013 available, not scheduled", MARGIN + 82, r.y - 10, 7, r.fonts.reg, C.muted);
+  r.y -= 18;
+  const subtitle = r.subtitle;
+  r.subtitle = "";
+  const columns = [
+    { title: "ID", weight: 0.8 },
+    { title: "Name", weight: 2.2 },
+    ...days.map((d) => ({ title: `${DAY_NAMES[d.weekday].slice(0, 3)} ${short(d.date)}`, weight: 1 })),
+    { title: "Hours", weight: 0.8 },
+    { title: "Shifts", weight: 0.8 }
+  ];
+  const workFill = hex("#E7F3EA");
+  const vacFill = hex("#FDF1E4");
+  const rows = people.map((p) => {
+    const t = personType(p.lgNumber, p.shiftsPerWeek);
+    let hours = 0;
+    let shifts = 0;
+    const cells = days.map((d) => {
+      const working = d.assignments.some((a) => a.slots.some((s) => s.entry?.personnelId === p.id));
+      if (working) {
+        hours += t.hoursPerShift;
+        shifts++;
+        return { items: [{ kind: "text", text: String(t.hoursPerShift), bold: true }], fill: workFill };
+      }
+      const av = availability(p, d.date);
+      if (!av.available) {
+        const code = OFF_SHORT[av.reason ?? "other"];
+        return { items: [{ kind: "text", text: code, bold: true, size: 7, color: C.muted }], fill: av.reason === "regular_day_off" || av.reason === "inactive" ? C.off : vacFill };
+      }
+      return { items: [{ kind: "text", text: "\u2013", color: C.muted }] };
+    });
+    const under = shifts < t.shiftsPerWeek;
+    return [
+      { items: [{ kind: "chip", text: p.lgNumber, label: p.labelColor }] },
+      { items: [{ kind: "text", text: p.name }] },
+      ...cells,
+      { items: [{ kind: "text", text: String(hours), bold: true }] },
+      { items: [{ kind: "text", text: `${shifts}/${t.shiftsPerWeek}`, bold: true, color: under ? C.open : C.ink }] }
+    ];
+  });
+  r.table(columns, rows);
+  r.subtitle = subtitle;
 }
 function dailySheet(r, week, opts, ctx) {
   for (const d of week.days.filter((x) => opts.dates.includes(x.date))) {
@@ -24428,7 +24578,7 @@ async function renderSchedulePdf(week, ctx, opts) {
   const orient = opts.orientation === "auto" ? LAYOUT_INFO[opts.layout].defaultOrientation : opts.orientation;
   const size = orient === "landscape" ? [Math.max(w, h), Math.min(w, h)] : [Math.min(w, h), Math.max(w, h)];
   const r = new Renderer(doc, fonts, opts, week, size);
-  if (opts.layout === "week-grid") weekGrid(r, week, opts);
+  if (opts.layout === "week-grid") weekGrid(r, week, opts, ctx);
   else if (opts.layout === "daily-sheet") dailySheet(r, week, opts, ctx);
   else if (opts.layout === "roster") roster(r, week, opts, ctx);
   else byAssignment(r, week, opts);
