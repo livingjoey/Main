@@ -24234,6 +24234,23 @@ var Renderer = class {
       }
     };
     for (const it of cell.items) {
+      if (it.kind === "chip" && it.big) {
+        endChipRow();
+        const afterW = it.after ? this.fonts.reg.widthOfTextAtSize(safe(it.after), SIZE) + 6 : 0;
+        const w = inner - afterW;
+        const H = it.h ?? 19;
+        const f = this.fonts.bold;
+        const size = Math.min(14, Math.max(7, (w - 8) / (f.widthOfTextAtSize("LG00", 1) * Math.max(4, safe(it.text).length) / 4)));
+        if (draw) {
+          const style = it.label && this.opts.colors ? LABEL[it.label] : PLAIN;
+          this.page.drawRectangle({ x: x + PAD, y: y - H, width: w, height: H, color: style.fill, borderColor: style.border, borderWidth: style.borderWidth + 0.3 });
+          const t = this.fit(it.text + (it.mark ?? ""), f, size, w - 4);
+          this.text(this.page, t, x + PAD + (w - f.widthOfTextAtSize(t, size)) / 2, y - H + (H - size * 0.72) / 2, size, f, style.text);
+          if (it.after) this.text(this.page, it.after, x + PAD + w + 4, y - H + (H - SIZE * 0.72) / 2, SIZE, this.fonts.reg);
+        }
+        y -= H + 2;
+        continue;
+      }
       if (it.kind === "chip") {
         const w = Math.min(this.chipWidth(it), inner);
         const afterW = it.after ? Math.min(this.fonts.reg.widthOfTextAtSize(safe(it.after), SIZE) + 4, Math.max(inner - w - 4, 0)) : 0;
@@ -24399,8 +24416,9 @@ function drawGrid(r, grid) {
   const chipItem = (c) => c ? { kind: "chip", text: c.name ? `${c.id} ${c.name}` : c.id, label: c.color, mark: c.ovr ? "!" : "", after: c.capt ? "Capt" : void 0 } : { kind: "chip", text: "OPEN", label: null, open: true };
   const cellFor = (c) => {
     if (c.kind === "closed") return { items: [{ kind: "text", text: "CLOSED", bold: true, size: 6.5, color: C.muted }], fill: C.closed };
-    if (c.kind === "slots") return { items: c.chips.map(chipItem) };
-    const items = c.boats.flatMap((b) => [{ kind: "text", text: b.name, bold: true, size: 6.5, color: C.navy }, ...b.chips.map(chipItem)]);
+    const solo = (chips) => chips.length === 1 && !!chips[0];
+    if (c.kind === "slots") return { items: solo(c.chips) ? [{ ...chipItem(c.chips[0]), big: true }] : c.chips.map(chipItem) };
+    const items = c.boats.flatMap((b) => [{ kind: "text", text: b.name, bold: true, size: 6.5, color: C.navy }, ...solo(b.chips) ? [{ ...chipItem(b.chips[0]), big: true }] : b.chips.map(chipItem)]);
     return { items: items.length ? items : [{ kind: "text", text: "\u2014", color: C.muted }] };
   };
   const noteFill = hex("#FFF6D6");
@@ -24419,6 +24437,7 @@ function drawGrid(r, grid) {
       fill: C.head
     };
     const h = Math.max(36, r.layout(dayCell, left, r.y, dayW, false), ...cells.map((c, i) => r.layout(c, xs[i], r.y, widths[i], false)));
+    for (const c of cells) if (c.items.length === 1 && c.items[0].kind === "chip" && c.items[0].big) c.items[0].h = h - PAD * 2;
     const noteLines = strips.flatMap(([lead, text]) => r.wrap(`${lead} ${text}`, reg, 7, usable - dayW - PAD * 2 - 14));
     const noteH = noteLines.length ? noteLines.length * 9 + 5 : 0;
     if (r.y - h - noteH < MARGIN + 18) {
