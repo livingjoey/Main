@@ -24147,6 +24147,11 @@ var LABEL = {
   dark_blue: { fill: hex("#0D2F6B"), text: C.white, border: hex("#0D2F6B"), borderWidth: 0.5 },
   white: { fill: C.white, text: C.ink, border: hex("#E8B400"), borderWidth: 1.4 }
 };
+var GROUP_TINT = {
+  Squads: { bg: hex("#F1ECFB"), ink: hex("#5B3FA8") },
+  "Jet Skis": { bg: hex("#E0F3F0"), ink: hex("#0F766E") },
+  Boats: { bg: hex("#FBF0DC"), ink: hex("#93530A") }
+};
 var PLAIN = { fill: C.white, text: C.ink, border: hex("#8C9AAB"), borderWidth: 0.6 };
 var SIZE = 8;
 var LINE = 10;
@@ -24264,6 +24269,7 @@ var Renderer = class {
   /** Lays out a cell; draws it when `draw` is set. Returns its content height. */
   layout(cell, x, top, width, draw) {
     const inner = width - PAD * 2;
+    if (cell.tiles) return this.tiles(cell, x, top, inner, draw);
     let y = top - PAD;
     let cx = 0;
     let rowOpen = false;
@@ -24314,6 +24320,37 @@ var Renderer = class {
     }
     endChipRow();
     return top - y + PAD - 2;
+  }
+  /** Two or more guards: equal tiles filling the box, big bold IDs (same size in every tile). */
+  tiles(cell, x, top, inner, draw) {
+    const chips = cell.items.filter((i) => i.kind === "chip");
+    const cols = Math.min(cell.tiles.cols, chips.length);
+    const rows = Math.ceil(chips.length / cols);
+    const gap = 2;
+    const minH = 14;
+    const natural = rows * minH + (rows - 1) * gap;
+    const avail = cell.tiles.fillH ? cell.tiles.fillH - PAD * 2 : natural;
+    const h = Math.max(minH, (avail - (rows - 1) * gap) / rows);
+    const w = (inner - (cols - 1) * gap) / cols;
+    const f = this.fonts.bold;
+    const size = Math.min(10.5, h * 0.62, (w - 6) / (f.widthOfTextAtSize("LG00", 1) * Math.max(1, Math.max(...chips.map((c) => safe(c.text).length))) / 4));
+    if (draw) {
+      chips.forEach((c, i) => {
+        const odd = cols > 1 && chips.length % cols === 1;
+        const span = odd && i === 0;
+        const k = odd ? i + 1 : i;
+        const cx = span ? x + PAD : x + PAD + k % cols * (w + gap);
+        const cy = top - PAD - Math.floor(k / cols) * (h + gap) - h;
+        const tw = span ? inner : w;
+        const open = !!c.open;
+        const style = open ? { fill: C.white, text: C.open, border: C.open, borderWidth: 0.8 } : c.label && this.opts.colors ? LABEL[c.label] : PLAIN;
+        this.page.drawRectangle({ x: cx, y: cy, width: tw, height: h, color: style.fill, borderColor: style.border, borderWidth: open ? 0.8 : style.borderWidth + 0.2, borderDashArray: open ? [2, 1.5] : void 0 });
+        const t = this.fit(c.text + (c.mark ?? ""), f, open ? Math.min(size, 7) : size, tw - 4);
+        const sz = open ? Math.min(size, 7) : size;
+        this.text(this.page, t, cx + (tw - f.widthOfTextAtSize(t, sz)) / 2, cy + (h - sz * 0.72) / 2, sz, f, style.text);
+      });
+    }
+    return natural + PAD * 2 - 2;
   }
   table(columns, rows, opts = {}) {
     const usable = this.width - MARGIN * 2;
@@ -24442,8 +24479,9 @@ function drawGrid(r, grid) {
       const x = xs[i];
       const w = xs[j] + widths[j] - x;
       const label = cols[i].band === "Stands" ? `STANDS ${cols[i].label}\u2013${cols[j].label}` : cols[i].band.toUpperCase();
-      r.text(r.page, label, x + 3, r.y - 9, 7, bold, C.navy);
-      r.page.drawRectangle({ x: x + 1, y: r.y - 13, width: w - 2, height: 1.2, color: C.navy });
+      const ink = GROUP_TINT[cols[i].band]?.ink ?? C.navy;
+      r.text(r.page, label, x + 3, r.y - 9, 7, bold, ink);
+      r.page.drawRectangle({ x: x + 1, y: r.y - 13, width: w - 2, height: 1.2, color: ink });
       i = j + 1;
     }
     r.y -= 16;
@@ -24451,26 +24489,35 @@ function drawGrid(r, grid) {
     r.page.drawRectangle({ x: left, y: r.y - h, width: dayW, height: h, color: C.head, borderColor: C.line, borderWidth: 0.5 });
     r.text(r.page, "DAY", left + PAD, r.y - h + 6, 7, bold, C.muted);
     cols.forEach((c, i2) => {
-      r.page.drawRectangle({ x: xs[i2], y: r.y - h, width: widths[i2], height: h, color: C.head, borderColor: C.line, borderWidth: 0.5 });
+      const g = GROUP_TINT[c.band];
+      r.page.drawRectangle({ x: xs[i2], y: r.y - h, width: widths[i2], height: h, color: g?.bg ?? C.head, borderColor: C.line, borderWidth: 0.5 });
       if (c.label) {
         const t = r.fit(c.label, bold, 11, widths[i2] - 4);
-        r.text(r.page, t, xs[i2] + (widths[i2] - bold.widthOfTextAtSize(t, 11)) / 2, r.y - h + 5, 11, bold, C.ink);
+        r.text(r.page, t, xs[i2] + (widths[i2] - bold.widthOfTextAtSize(t, 11)) / 2, r.y - h + 5, 11, bold, g?.ink ?? C.ink);
       }
     });
     r.y -= h;
   };
   header();
   const chipItem = (c) => c ? { kind: "chip", text: c.name ? `${c.id} ${c.name}` : c.id, label: c.color, mark: c.ovr ? "!" : "", after: c.capt ? "Capt" : void 0 } : { kind: "chip", text: "OPEN", label: null, open: true };
-  const cellFor = (c) => {
+  const cellFor = (c, wide = false) => {
     if (c.kind === "closed") return { items: [{ kind: "text", text: "CLOSED", bold: true, size: 6.5, color: C.muted }], fill: C.closed };
     const solo = (chips) => chips.length === 1 && !!chips[0];
-    if (c.kind === "slots") return { items: solo(c.chips) ? [{ ...chipItem(c.chips[0]), big: true }] : c.chips.map(chipItem) };
-    const items = c.boats.flatMap((b) => [{ kind: "text", text: b.name, bold: true, size: 6.5, color: C.navy }, ...solo(b.chips) ? [{ ...chipItem(b.chips[0]), big: true }] : b.chips.map(chipItem)]);
+    if (c.kind === "slots") {
+      if (solo(c.chips)) return { items: [{ ...chipItem(c.chips[0]), big: true }] };
+      if (c.chips.filter(Boolean).length >= 2) return { items: c.chips.map(chipItem), tiles: { cols: wide ? 2 : 1 } };
+      return { items: c.chips.map(chipItem) };
+    }
+    const items = c.boats.flatMap((b) => [{ kind: "text", text: b.name, bold: true, size: 6.5, color: b.name.startsWith("Event") ? C.navy : GROUP_TINT.Boats.ink }, ...solo(b.chips) ? [{ ...chipItem(b.chips[0]), big: true }] : b.chips.map(chipItem)]);
     return { items: items.length ? items : [{ kind: "text", text: "\u2014", color: C.muted }] };
   };
   const noteFill = hex("#FFF6D6");
   for (const d of grid.days) {
-    const cells = d.cells.map(cellFor);
+    const cells = d.cells.map((c, i) => {
+      const cell = cellFor(c, cols[i].wide);
+      const g = GROUP_TINT[cols[i].band];
+      return g && !cell.fill ? { ...cell, fill: g.bg } : cell;
+    });
     const strips = [
       ["Training:", d.training],
       ["Note:", d.note]
@@ -24485,6 +24532,7 @@ function drawGrid(r, grid) {
     };
     const h = Math.max(36, r.layout(dayCell, left, r.y, dayW, false), ...cells.map((c, i) => r.layout(c, xs[i], r.y, widths[i], false)));
     for (const c of cells) if (c.items.length === 1 && c.items[0].kind === "chip" && c.items[0].big) c.items[0].h = h - PAD * 2;
+    for (const c of cells) if (c.tiles) c.tiles.fillH = h;
     const noteLines = strips.flatMap(([lead, text]) => r.wrap(`${lead} ${text}`, reg, 7, usable - dayW - PAD * 2 - 14));
     const noteH = noteLines.length ? noteLines.length * 9 + 5 : 0;
     if (r.y - h - noteH < MARGIN + 18) {
