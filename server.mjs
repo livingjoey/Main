@@ -569,9 +569,9 @@ var require_strings = __commonJS({
       var match2 = dateStr.match(dateRegex);
       if (!match2)
         return void 0;
-      var year = match2[1], _a = match2[2], month = _a === void 0 ? "01" : _a, _b = match2[3], day = _b === void 0 ? "01" : _b, _c = match2[4], hours = _c === void 0 ? "00" : _c, _d = match2[5], mins = _d === void 0 ? "00" : _d, _e = match2[6], secs = _e === void 0 ? "00" : _e, _f = match2[7], offsetSign = _f === void 0 ? "Z" : _f, _g = match2[8], offsetHours = _g === void 0 ? "00" : _g, _h = match2[9], offsetMins = _h === void 0 ? "00" : _h;
+      var year = match2[1], _a = match2[2], month = _a === void 0 ? "01" : _a, _b = match2[3], day = _b === void 0 ? "01" : _b, _c = match2[4], hours = _c === void 0 ? "00" : _c, _d = match2[5], mins2 = _d === void 0 ? "00" : _d, _e = match2[6], secs = _e === void 0 ? "00" : _e, _f = match2[7], offsetSign = _f === void 0 ? "Z" : _f, _g = match2[8], offsetHours = _g === void 0 ? "00" : _g, _h = match2[9], offsetMins = _h === void 0 ? "00" : _h;
       var tzOffset = offsetSign === "Z" ? "Z" : "" + offsetSign + offsetHours + ":" + offsetMins;
-      var date2 = /* @__PURE__ */ new Date(year + "-" + month + "-" + day + "T" + hours + ":" + mins + ":" + secs + tzOffset);
+      var date2 = /* @__PURE__ */ new Date(year + "-" + month + "-" + day + "T" + hours + ":" + mins2 + ":" + secs + tzOffset);
       return date2;
     };
     exports.findLastMatch = function(value, regex) {
@@ -9160,9 +9160,9 @@ var require_PDFString = __commonJS({
           var month = utils_1.padStart(String(date2.getUTCMonth() + 1), 2, "0");
           var day = utils_1.padStart(String(date2.getUTCDate()), 2, "0");
           var hours = utils_1.padStart(String(date2.getUTCHours()), 2, "0");
-          var mins = utils_1.padStart(String(date2.getUTCMinutes()), 2, "0");
+          var mins2 = utils_1.padStart(String(date2.getUTCMinutes()), 2, "0");
           var secs = utils_1.padStart(String(date2.getUTCSeconds()), 2, "0");
-          return new PDFString2("D:" + year + month + day + hours + mins + secs + "Z");
+          return new PDFString2("D:" + year + month + day + hours + mins2 + secs + "Z");
         };
         return PDFString2;
       })(PDFObject_1.default)
@@ -23383,7 +23383,11 @@ function weekLoad(ctx, weekDatesList) {
   const inWeek = new Set(weekDatesList);
   const load = /* @__PURE__ */ new Map();
   const days = /* @__PURE__ */ new Set();
-  for (const e of ctx.entries) if (inWeek.has(e.date)) days.add(`${e.personnelId}|${e.date}`);
+  for (const e of ctx.entries) {
+    if (!inWeek.has(e.date)) continue;
+    const kind = ctx.assignments.get(ctx.slots.get(e.slotId)?.assignmentId ?? -1)?.kind;
+    if (kind && kind !== "extra") days.add(`${e.personnelId}|${e.date}`);
+  }
   for (const k of days) {
     const pid = Number(k.split("|")[0]);
     load.set(pid, (load.get(pid) ?? 0) + 1);
@@ -23435,6 +23439,35 @@ function candidatesFor(ctx, date2, slotId, weekDatesList) {
 function personType(lgNumber, shiftsOverride) {
   const t = /^B\d/i.test(lgNumber) ? { label: "Supervisor", shiftsPerWeek: 4, hoursPerShift: 10, start: "08:00", end: "18:00" } : { label: "Lifeguard", shiftsPerWeek: 5, hoursPerShift: 8, start: "09:00", end: "17:00" };
   return typeof shiftsOverride === "number" ? { ...t, shiftsPerWeek: shiftsOverride } : t;
+}
+var mins = (hhmm2) => {
+  const [h, m] = hhmm2.split(":").map(Number);
+  return h * 60 + (m || 0);
+};
+var fmtH = (n) => Math.round(n * 4) / 4;
+function dayHours(t, onShift, events) {
+  const spans = events.filter((e) => !!e && /^\d{1,2}:\d{2}$/.test(e.start) && /^\d{1,2}:\d{2}$/.test(e.end)).map((e) => {
+    const a = mins(e.start);
+    let b = mins(e.end);
+    if (b <= a) b += 24 * 60;
+    return [a, b];
+  }).sort((x, y) => x[0] - y[0]);
+  const merged = [];
+  for (const [a, b] of spans) {
+    const last = merged[merged.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else merged.push([a, b]);
+  }
+  let extraMin = 0;
+  const s0 = onShift && t.start ? mins(t.start) : 0;
+  const s1 = onShift && t.end ? mins(t.end) : 0;
+  for (const [a, b] of merged) {
+    const overlap = onShift ? Math.max(0, Math.min(b, s1) - Math.max(a, s0)) : 0;
+    extraMin += b - a - overlap;
+  }
+  const untimed = events.length - spans.length;
+  const extra = fmtH(extraMin / 60);
+  return { hours: fmtH((onShift ? t.hoursPerShift : 0) + extraMin / 60), extra, untimed };
 }
 function lgCompare(a, b) {
   const pa = a.replace(/\d+$/, "").toUpperCase();
@@ -23510,7 +23543,8 @@ function planAutoFill(ctx, opts) {
     const onStand = () => new Set(day.filter((d) => kindOf(d.slotId) === "stand").map((d) => d.personnelId));
     const onUnit = () => new Set(day.filter((d) => kindOf(d.slotId) !== "stand").map((d) => d.personnelId));
     const take = (slotId, pid) => {
-      if (!onStand().has(pid) && !onUnit().has(pid)) load.set(pid, (load.get(pid) ?? 0) + 1);
+      const onShiftToday = day.some((d) => d.personnelId === pid && kindOf(d.slotId) !== "extra");
+      if (kindOf(slotId) !== "extra" && !onShiftToday) load.set(pid, (load.get(pid) ?? 0) + 1);
       day.push({ slotId, personnelId: pid });
       plan.assign.push({ date: date2, slotId, personnelId: pid });
       const a = asgOf(slotId);
@@ -23696,6 +23730,13 @@ function buildWeekFromContext(ctx, weekStart, status = "draft", publishedAt = nu
     return { date: date2, weekday: weekdayName(date2), assignments: views, stats };
   });
   return { weekStart, weekEnd: addDays(weekStart, 6), status, publishedAt, days, totals };
+}
+function hoursOnDay(day, p, eventTimes) {
+  const mine = day.assignments.filter((a) => a.slots.some((s) => s.entry?.personnelId === p.id));
+  if (!mine.length) return { worked: false, onShift: false, hours: 0, extra: 0, untimed: 0 };
+  const onShift = mine.some((a) => a.kind !== "extra");
+  const events = mine.filter((a) => a.kind === "extra").map((a) => eventTimes?.[`${a.assignmentId}|${day.date}`]);
+  return { worked: true, onShift, ...dayHours(personType(p.lgNumber, p.shiftsPerWeek), onShift, events) };
 }
 
 // src/services/week.ts
@@ -24368,7 +24409,13 @@ function gridFromWeekView(week, opts) {
       const cells = cols.map((c) => {
         const list2 = c.ids.map((id) => m.get(id)).filter(Boolean);
         if (!c.merged) return list2[0].open ? { kind: "slots", chips: shown(list2[0]) } : { kind: "closed" };
-        return { kind: "boats", boats: list2.filter((a) => a.open && (a.min > 0 || a.slots.some((s) => s.entry))).map((a) => ({ name: a.short ?? a.displayName, chips: shown(a, a.kind === "boat") })) };
+        return {
+          kind: "boats",
+          boats: list2.filter((a) => a.open && (a.min > 0 || a.slots.some((s) => s.entry))).map((a) => {
+            const et = a.kind === "extra" ? opts.eventTimes?.[`${a.assignmentId}|${d.date}`] : null;
+            return { name: `${a.short ?? a.displayName}${et ? ` ${et.start.replace(":", "")}\u2013${et.end.replace(":", "")}` : ""}`, chips: shown(a, a.kind === "boat") };
+          })
+        };
       });
       const onDuty = new Set(d.assignments.flatMap((a) => a.slots.flatMap((s) => s.entry ? [s.entry.personnelId] : []))).size;
       return { date: d.date, weekday: d.weekday, onDuty, note: opts.notes?.[d.date]?.trim() || null, training: opts.training?.[d.date]?.trim() || null, cells };
@@ -24472,9 +24519,9 @@ function drawGrid(r, grid) {
 function weekGrid(r, week, opts, ctx) {
   const grid = gridFromWeekView(week, opts);
   drawGrid(r, grid);
-  if (opts.hoursGrid !== false && grid.days.length) hoursGrid(r, week.days.filter((d) => opts.dates.includes(d.date)), ctx);
+  if (opts.hoursGrid !== false && grid.days.length) hoursGrid(r, week.days.filter((d) => opts.dates.includes(d.date)), ctx, opts.eventTimes);
 }
-function hoursGrid(r, days, ctx) {
+function hoursGrid(r, days, ctx, eventTimes) {
   const people = [...ctx.personnel.values()].filter((p) => p.active || days.some((d) => d.assignments.some((a) => a.slots.some((s) => s.entry?.personnelId === p.id)))).sort((a, b) => lgCompare(a.lgNumber, b.lgNumber));
   if (!people.length) return;
   const { reg, bold, mono } = r.fonts;
@@ -24493,17 +24540,23 @@ function hoursGrid(r, days, ctx) {
   const CODE = { regular_day_off: "O", inactive: "O", vacation: "V", leave: "L", training: "T", other: "X" };
   const rows = people.map((p) => {
     const t = personType(p.lgNumber, p.shiftsPerWeek);
+    let hours = 0;
+    let shifts = 0;
     const cells = days.map((d) => {
-      if (d.assignments.some((a) => a.slots.some((s) => s.entry?.personnelId === p.id))) return { text: String(t.hoursPerShift), fill: workFill, strong: true };
+      const h = hoursOnDay(d, p, eventTimes);
+      if (h.worked) {
+        hours += h.hours;
+        if (h.onShift) shifts++;
+        return { text: String(h.hours), fill: workFill, strong: true };
+      }
       const av = availability(p, d.date);
       if (!av.available) return { text: CODE[av.reason ?? "other"] ?? "X", fill: av.reason === "regular_day_off" || av.reason === "inactive" ? C.off : awayFill, strong: false };
       return { text: "\u2013", fill: C.white, strong: false };
     });
-    const shifts = cells.filter((c) => c.fill === workFill).length;
-    return { p, t, cells, hours: shifts * t.hoursPerShift, shifts };
+    return { p, t, cells, hours, shifts };
   });
   r.text(page, "Hours worked", MARGIN, r.y - 11, 11, bold, C.ink);
-  r.text(page, "Hours on duty each day.  O off  \xB7  V vacation  \xB7  L leave  \xB7  T training  \xB7  X other  \xB7  \u2013 available, not scheduled", MARGIN + 82, r.y - 10, 7, reg, C.muted);
+  r.text(page, "Hours each day, Event time outside the shift included.  O off  \xB7  V vacation  \xB7  L leave  \xB7  T training  \xB7  X other  \xB7  \u2013 available, not scheduled", MARGIN + 82, r.y - 10, 7, reg, C.muted);
   r.y -= 17;
   const cellText = (t, x, y, w, size, font, color = C.ink) => {
     const s = r.fit(t, font, size, w - 1.5);
@@ -25015,7 +25068,10 @@ function buildWeekGrid(input) {
         const a = c.ids[0];
         return isOpen2(a, date2) ? { kind: "slots", chips: shown(a, date2) } : { kind: "closed" };
       }
-      const boats = c.ids.filter((a) => isOpen2(a, date2) && ((a.minGuards ?? a.slots.length) > 0 || a.slots.some((s) => bySlot.has(`${date2}|${s.id}`)))).map((a) => ({ name: a.short ?? a.displayName, chips: shown(a, date2, a.kind === "boat") }));
+      const boats = c.ids.filter((a) => isOpen2(a, date2) && ((a.minGuards ?? a.slots.length) > 0 || a.slots.some((s) => bySlot.has(`${date2}|${s.id}`)))).map((a) => {
+        const et = a.kind === "extra" ? week?.eventTimes?.[`${a.id}|${date2}`] : null;
+        return { name: `${a.short ?? a.displayName}${et ? ` \xB7 ${et.start.replace(":", "")}\u2013${et.end.replace(":", "")}` : ""}`, chips: shown(a, date2, a.kind === "boat") };
+      });
       return { kind: "boats", boats };
     });
     const onDuty = /* @__PURE__ */ new Set();
@@ -25085,23 +25141,35 @@ function personalWeek(input) {
         }).filter((v) => !!v).sort(lgCompare);
         return { where: x.a.kind === "stand" ? x.a.displayName : unitName(x), ids: [...new Set(ids)] };
       }).filter((g) => g.ids.length);
-      const main = stands[0]?.a ?? units[0].a;
+      const evTime = (a) => w.eventTimes?.[`${a.id}|${date2}`] ?? null;
+      const onShift = placed.some((x) => x.a.kind !== "extra");
+      const events = units.filter((x) => x.a.kind === "extra");
+      const h = dayHours(t, onShift, events.map((x) => evTime(x.a)));
+      const main = stands[0]?.a ?? units.find((x) => x.a.kind !== "extra")?.a;
+      const firstEv = events.map((x) => evTime(x.a)).find(Boolean);
       return {
         date: date2,
         weekday: weekdayName(date2),
         status: "work",
         stands: stands.map((x) => x.a.displayName),
-        units: units.map((x) => x.a.kind === "boat" && x.slot === "Captain" ? `${x.a.displayName} \xB7 Captain` : x.a.displayName),
-        start: hhmm(main.startTime) ?? hhmm(t.start),
-        end: hhmm(main.endTime) ?? hhmm(t.end),
-        hours: t.hoursPerShift,
+        units: units.map((x) => {
+          if (x.a.kind === "extra") {
+            const et = evTime(x.a);
+            return et ? `${x.a.displayName} \xB7 ${hhmm(et.start)}\u2013${hhmm(et.end)}` : x.a.displayName;
+          }
+          return x.a.kind === "boat" && x.slot === "Captain" ? `${x.a.displayName} \xB7 Captain` : x.a.displayName;
+        }),
+        start: main ? hhmm(main.startTime) ?? hhmm(t.start) : firstEv ? hhmm(firstEv.start) : null,
+        end: main ? hhmm(main.endTime) ?? hhmm(t.end) : firstEv ? hhmm(firstEv.end) : null,
+        hours: h.hours,
+        eventHours: h.extra,
         ...extras(date2),
         partners
       };
     }
     const av = availability(ctx, date2);
     const reason = av.available ? "off" : av.reason === "vacation" || av.reason === "leave" || av.reason === "training" || av.reason === "other" ? av.reason : "off";
-    return { date: date2, weekday: weekdayName(date2), status: reason, stands: [], units: [], start: null, end: null, hours: 0, ...extras(date2), partners: [] };
+    return { date: date2, weekday: weekdayName(date2), status: reason, stands: [], units: [], start: null, end: null, hours: 0, eventHours: 0, ...extras(date2), partners: [] };
   });
   return {
     found: true,
